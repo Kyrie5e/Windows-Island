@@ -1,12 +1,8 @@
----
-typora-root-url: ./assets
----
+![1](assets/1.png)
 
-![1](/1.png)
+![2](assets/2.png)
 
-![2](/2.png)
-
-![3](/3.png)
+![3](assets/3.png)
 
 
 
