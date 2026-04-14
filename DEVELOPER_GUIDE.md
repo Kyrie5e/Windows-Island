@@ -235,7 +235,7 @@ Windows-Island/
 `island-permission.ps1` 收到 PreToolUse 触发后：
 
 1. 读取 stdin 中的工具名和命令
-2. 检查 settings.json 的 `permissions.allow` 列表，若已放行则直接 `exit 0`（跳过 Island UI）
+2. 检查 settings.json 的 `permissions.allow` 列表，仅当存在**全局放行规则**（裸工具名如 `Bash` 或通配符 `Bash(*)`）时才跳过 Island UI；作用域规则如 `Bash(npm run:*)` 不会触发快速路径，由 Claude Code 内部匹配
 3. 通过 WebSocket 向 Island 发送 `{ state: "permission_required" }` 消息
 4. Island 展示 **Approve / Always Allow / Deny** 三个按钮
 5. 用户点击后，Island 将响应字符串写入 `%TEMP%\island-permission-response.txt`

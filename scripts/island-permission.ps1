@@ -39,13 +39,19 @@ foreach ($sf in $settingsFiles) {
             $allowed = $cfg.permissions.allow
             if ($allowed) {
                 foreach ($rule in $allowed) {
-                    # Rules look like "Bash(*)", "Edit", "Write(*)", etc.
-                    $ruleTool = ($rule -split '\(')[0].Trim()
-                    if ($ruleTool -eq $Tool) {
-                        # Tool type matches an allow rule -> already approved, skip Island UI
+                    # Rules look like "Bash", "Bash(*)", "Edit", "Bash(npm run:*)", etc.
+                    # Only skip Island UI for BROAD rules that allow ALL uses of a tool:
+                    #   - Bare tool name: "Bash", "Edit", "Write"
+                    #   - Wildcard-all:   "Bash(*)"
+                    # Scoped rules like "Bash(npm run:*)" only allow specific commands —
+                    # Claude Code handles matching internally, so we must still show the
+                    # Island UI for commands that don't match any scoped rule.
+                    $trimmed = $rule.Trim()
+                    $isBareToolName = ($trimmed -eq $Tool)
+                    $isWildcardAll  = ($trimmed -eq "$Tool(*)")
+                    if ($isBareToolName -or $isWildcardAll) {
                         exit 0
                     }
-                }
             }
         }
     } catch {}
