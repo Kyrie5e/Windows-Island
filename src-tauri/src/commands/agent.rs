@@ -26,10 +26,15 @@ pub struct AgentStatus {
 
 /// Send a response back to the connected agent.
 ///
+/// Permission actions (approve/always_allow/deny) only write a response file
+/// that island-permission.ps1 polls — the hook's exit code controls Claude Code.
+/// No keyboard injection needed for permissions.
+///
+/// - "approve": writes "approve" to temp file → hook exits 0
+/// - "always_allow": writes "always_allow" → hook persists to settings.local.json, then exits 0
+/// - "deny": writes "deny" → hook exits 2 (blocks)
+/// - "cancel": writes "cancel" → hook exits 0 (used for auto-approved tools)
 /// - "ask": focuses the Claude terminal and types the message + Enter (keyboard injection)
-/// - "approve": focuses terminal, types "y" + Enter, and writes "approve" to temp file
-/// - "deny": focuses terminal, types "n" + Enter, and writes "deny" to temp file
-/// - "cancel": only writes "cancel" to temp file (used when Claude Code auto-approved an allowed tool)
 #[tauri::command]
 pub async fn send_agent_response(action: String, message: Option<String>) -> Result<(), String> {
     match action.as_str() {
@@ -45,28 +50,18 @@ pub async fn send_agent_response(action: String, message: Option<String>) -> Res
             Ok(())
         }
         "approve" => {
-            // Keyboard inject "y" + Enter into the Claude terminal, then write file
-            // for island-permission.ps1 compatibility
-            let _ = focus_agent_window();
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            type_text_to_foreground("y");
-            send_key_enter();
+            // Write response to temp file for island-permission.ps1 to read.
+            // The hook script's exit code (0) controls Claude Code's permission —
+            // no keyboard injection needed.
             write_permission_response("approve")
         }
         "always_allow" => {
-            // Keyboard inject "a" + Enter — approve and always allow similar operations
-            let _ = focus_agent_window();
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            type_text_to_foreground("a");
-            send_key_enter();
+            // Write response to temp file. island-permission.ps1 will also
+            // persist the tool to settings.local.json before exiting 0.
             write_permission_response("always_allow")
         }
         "deny" => {
-            // Keyboard inject "n" + Enter into the Claude terminal, then write file
-            let _ = focus_agent_window();
-            std::thread::sleep(std::time::Duration::from_millis(150));
-            type_text_to_foreground("n");
-            send_key_enter();
+            // Write response to temp file. island-permission.ps1 exits 2 to block.
             write_permission_response("deny")
         }
         "cancel" => {
