@@ -25,7 +25,7 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 const BASE_PANEL_HEIGHT = 156;
-const RESPONSE_PANEL_EXTRA = 220; // max-height(200) + header(24) - some overlap
+const RESPONSE_PANEL_EXTRA = 320; // max-height(300) + header(24) - some overlap
 const HOVER_ZONE = 20;
 const COLLAPSED_HEIGHT_GAP = 8; // 4(bar) + 4(gap)
 

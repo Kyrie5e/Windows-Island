@@ -46,8 +46,8 @@ if ($ReadStdin) {
                 }
 
                 # Truncate to avoid oversized WebSocket messages
-                if ($Message -and $Message.Length -gt 2000) {
-                    $Message = $Message.Substring(0, 2000) + '...'
+                if ($Message -and $Message.Length -gt 5000) {
+                    $Message = $Message.Substring(0, 5000) + '...'
                 }
             }
         }
