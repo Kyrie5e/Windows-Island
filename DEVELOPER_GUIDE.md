@@ -99,10 +99,16 @@ Windows-Island/
 │   └── sounds/
 │       └── notification.wav      # 通知提示音（C5→E5 双音调，约 1 秒）
 │
-└── ~/.claude/                    # Claude Code 集成配置（非项目目录）
+├── scripts/                      # Claude Code 集成脚本（一键安装到 ~/.claude/scripts/）
+│   ├── island-notify.ps1         # Stop / PostToolUse hook：推送 idle 状态 + 读取 AI 回复
+│   ├── island-permission.ps1     # PreToolUse hook：展示权限审批 UI，轮询用户响应
+│   └── install.ps1               # 一键安装脚本：复制脚本 + 写入 Claude Code hooks 配置
+│
+└── ~/.claude/                    # Claude Code 本地配置（运行 install.ps1 后自动生成）
     ├── scripts/
-    │   └── island-notify.ps1     # Hook 调用的 PowerShell WS 推送脚本
-    └── settings.json             # Claude Code hooks 配置
+    │   ├── island-notify.ps1
+    │   └── island-permission.ps1
+    └── settings.json             # hooks 段由 install.ps1 自动合并写入
 ```
 
 ---
@@ -214,26 +220,38 @@ Windows-Island/
 
 #### 5e. Claude Code Hooks 自动推送
 
-通过 Claude Code 的 hooks 机制，在每次工具使用前后自动推送状态：
+通过 Claude Code 的 hooks 机制，在工具使用前后自动与 Island 通信：
 
-**Hook 脚本**：`~/.claude/scripts/island-notify.ps1`
-- PowerShell 脚本，创建 WS 连接，发送 JSON，3 秒超时，失败静默忽略
+| Hook 类型 | 触发时机 | 调用脚本 | 效果 |
+|-----------|----------|---------|------|
+| `PreToolUse` (Bash/Edit/Write) | Claude Code 即将执行工具 | `island-permission.ps1` | 展示权限审批 UI，等待用户响应 |
+| `PostToolUse` (所有工具) | 工具执行完毕 | `island-notify.ps1 -State idle` | 通知 Island 回到待机状态 |
+| `Stop` | Claude Code 完成整轮对话 | `island-notify.ps1 -State idle -ReadStdin` | 读取 transcript，将 AI 回复摘要推送到面板 |
 
-**`~/.claude/settings.json` hooks 配置**：
-- `PreToolUse` → 推送 `{ state: "tool_use", tool: "...", message: "..." }`
-- `PostToolUse` → 推送 `{ state: "idle" }`
-- `Stop` → 推送 `{ state: "waiting_review" }`（触发面板自动弹出）
+**两个脚本均已放入仓库 `scripts/` 目录，运行 `scripts\install.ps1` 即可完成配置。**
 
-#### 5f. 键盘注入续问 + 审批
+#### 5f. 权限审批机制
 
-用户在 Island AI tab 中的操作会通过 **Win32 SendInput** 直接注入到 Claude Code 终端：
+`island-permission.ps1` 收到 PreToolUse 触发后：
 
-- **续问（waiting_review）**：用户在输入框键入文字 → Rust 聚焦终端窗口 → SendInput 逐字符输入 + Enter
-- **审批（permission_required）**：Approve → 键入 "y" + Enter；Deny → 键入 "n" + Enter
+1. 读取 stdin 中的工具名和命令
+2. 检查 settings.json 的 `permissions.allow` 列表，若已放行则直接 `exit 0`（跳过 Island UI）
+3. 通过 WebSocket 向 Island 发送 `{ state: "permission_required" }` 消息
+4. Island 展示 **Approve / Always Allow / Deny** 三个按钮
+5. 用户点击后，Island 将响应字符串写入 `%TEMP%\island-permission-response.txt`
+6. 脚本轮询该文件（最多等待 120 秒）：
+   - `approve` / `cancel` → `exit 0`（允许）
+   - `always_allow` → 将工具名写入 `settings.local.json` 的 `permissions.allow`，再 `exit 0`
+   - `deny` / 超时 → `exit 2`（Claude Code 阻止该操作）
+
+> ✅ **审批操作纯文件驱动，无键盘注入**，不会污染终端输入。
+
+#### 5g. 键盘注入续问
+
+续问（`waiting_review`）仍然使用 Win32 SendInput：
+
+- 用户在 AI Tab 输入框键入文字 → Rust 聚焦终端窗口（查找标题含 `"claude"` 的窗口）→ SendInput 逐字符发送 + Enter
 - 使用 `KEYEVENTF_UNICODE` 标志，绕过输入法，支持中文等多语言输入
-- 聚焦窗口后等待 150ms 确保窗口获得前台焦点
-
-> ⚠️ **注意**：SendInput 发送到当前前台窗口。如果聚焦终端的 150ms 窗口内用户切换了窗口，可能会打字到错误窗口。
 
 ---
 
@@ -349,56 +367,69 @@ interface AgentResponse {
 
 ## Claude Code Hooks 集成
 
-### 推送脚本
+### 脚本说明
 
-位置：`~/.claude/scripts/island-notify.ps1`
+仓库 `scripts/` 目录包含两个 Hook 脚本和一个安装程序：
+
+| 文件 | 说明 |
+|------|------|
+| `island-notify.ps1` | 接收 `-State` 参数，通过 WebSocket 向 Island 推送状态；`-ReadStdin` 模式下从 transcript 提取 AI 回复 |
+| `island-permission.ps1` | PreToolUse hook，向 Island 展示权限审批 UI，轮询用户响应并以退出码控制 Claude Code |
+| `install.ps1` | 一键安装：复制脚本到 `~/.claude/scripts/`，合并 hooks 配置到 `~/.claude/settings.json` |
+
+### 快速安装
 
 ```powershell
-param([string]$State, [string]$Tool = "", [string]$Message = "")
-$ws = New-Object System.Net.WebSockets.ClientWebSocket
-$cts = New-Object System.Threading.CancellationTokenSource
-$cts.CancelAfter(3000)
-try {
-    $ws.ConnectAsync([Uri]"ws://127.0.0.1:27182", $cts.Token).Wait()
-    $json = @{ state = $State; tool = $Tool; message = $Message } | ConvertTo-Json -Compress
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    $segment = [System.ArraySegment[byte]]::new($bytes)
-    $ws.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).Wait()
-    $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "", $cts.Token).Wait()
-} catch {} finally { $cts.Dispose(); if ($ws) { $ws.Dispose() } }
+# 在仓库根目录执行
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
-### settings.json hooks 配置
+安装完成后即可启动 Windows-Island，Claude Code 会自动对接。
+
+### 手动配置（可选）
+
+如需手动配置，将以下 `hooks` 段合并到 `~/.claude/settings.json`，把 `<USERNAME>` 替换为你的 Windows 用户名：
 
 ```json
 {
   "hooks": {
-    "PreToolUse": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "bash -c 'INPUT=$(cat); TOOL=$(echo \"$INPUT\" | jq -r \".tool // empty\"); MSG=$(echo \"$INPUT\" | jq -r \".tool_input.command // .tool_input.file_path // empty\" 2>/dev/null | head -c 100); powershell.exe -NoProfile -File \"C:/Users/USERNAME/.claude/scripts/island-notify.ps1\" -State tool_use -Tool \"$TOOL\" -Message \"$MSG\"'"
-      }]
-    }],
-    "PostToolUse": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "powershell.exe -NoProfile -File \"C:/Users/USERNAME/.claude/scripts/island-notify.ps1\" -State idle"
-      }]
-    }],
-    "Stop": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "powershell.exe -NoProfile -File \"C:/Users/USERNAME/.claude/scripts/island-notify.ps1\" -State idle"
-      }]
-    }]
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "powershell.exe -NoProfile -File \"C:/Users/<USERNAME>/.claude/scripts/island-permission.ps1\"" }]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [{ "type": "command", "command": "powershell.exe -NoProfile -File \"C:/Users/<USERNAME>/.claude/scripts/island-permission.ps1\"" }]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [{ "type": "command", "command": "powershell.exe -NoProfile -File \"C:/Users/<USERNAME>/.claude/scripts/island-permission.ps1\"" }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": "powershell.exe -NoProfile -File \"C:/Users/<USERNAME>/.claude/scripts/island-notify.ps1\" -State idle" }]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [{ "type": "command", "command": "powershell.exe -NoProfile -File \"C:/Users/<USERNAME>/.claude/scripts/island-notify.ps1\" -State idle -ReadStdin" }]
+      }
+    ]
   }
 }
 ```
 
-> 将 `USERNAME` 替换为实际 Windows 用户名。
+### 各 Hook 职责
+
+| Hook | 脚本 | 行为 |
+|------|------|------|
+| `PreToolUse` Bash/Edit/Write | `island-permission.ps1` | 展示审批 UI；`exit 0` 放行，`exit 2` 拒绝 |
+| `PostToolUse` 全部 | `island-notify.ps1 -State idle` | 推送 idle 状态 |
+| `Stop` | `island-notify.ps1 -State idle -ReadStdin` | 读取 AI 回复摘要并推送，触发面板弹出展示结果 |
 
 ---
 
@@ -409,13 +440,22 @@ try {
 - [Node.js](https://nodejs.org/) >= 18
 - [Rust](https://rustup.rs/) (stable)
 - [Tauri CLI](https://tauri.app/) — 通过 npm 安装即可
+- [Claude Code](https://claude.ai/download)（可选，AI Tab 集成需要）
 
 ### 安装依赖
 
 ```bash
-cd E:\Develop\Windows-Island
 npm install
 ```
+
+### 配置 Claude Code 集成（可选但推荐）
+
+```powershell
+# 在仓库根目录执行，自动完成脚本复制 + hooks 配置
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+> 如果遇到执行策略限制，先运行：`Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`
 
 ### 开发模式（热重载）
 
