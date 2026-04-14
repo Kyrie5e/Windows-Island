@@ -1,4 +1,12 @@
+---
+typora-root-url: ./assets
+---
 
+![1](/1.png)
+
+![2](/2.png)
+
+![3](/3.png)
 
 
 
@@ -10,9 +18,7 @@
 
 ## 效果预览
 
-> ![image-20260414111318837](C:\Users\17474\AppData\Roaming\Typora\typora-user-images\image-20260414111318837.png)
->
-> ![image-20260414111406887](C:\Users\17474\AppData\Roaming\Typora\typora-user-images\image-20260414111406887.png)
+> 
 
 平时收缩为屏幕顶部中央的一条短横线，鼠标悬停时展开为药丸形状的信息面板。
 
