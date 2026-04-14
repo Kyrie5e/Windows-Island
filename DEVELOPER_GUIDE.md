@@ -1,0 +1,525 @@
+# Windows-Island 开发者指南
+
+> 本文档面向后续开发者，介绍项目的整体架构、已实现功能、数据流和扩展方法。
+
+---
+
+## 目录
+
+1. [项目概述](#项目概述)
+2. [技术栈](#技术栈)
+3. [项目结构](#项目结构)
+4. [架构设计](#架构设计)
+5. [已实现功能](#已实现功能)
+6. [未完成 / 待优化功能](#未完成--待优化功能)
+7. [核心数据流](#核心数据流)
+8. [WebSocket 通信协议](#websocket-通信协议)
+9. [Claude Code Hooks 集成](#claude-code-hooks-集成)
+10. [构建与运行](#构建与运行)
+11. [如何扩展](#如何扩展)
+
+---
+
+## 项目概述
+
+**Windows-Island** 是一个仿 macOS Dynamic Island 风格的 Windows 顶部状态条 HUD。
+
+- 平时收缩为屏幕顶部中央的一条短横线（高 4px，宽 30px）
+- 鼠标悬停时展开为药丸形状的信息面板（480×156px）
+- 支持系统信息、媒体控制、系统通知、AI/Claude Code 状态显示
+- 与 Claude Code 深度集成：可接收 AI 状态推送，并直接从面板进行审批/回复操作
+
+---
+
+## 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 框架 | Tauri v2（Rust 后端 + WebView2 前端） |
+| 前端 | React + TypeScript，Vite 构建 |
+| 动画 | Framer Motion |
+| 后端语言 | Rust（2021 edition） |
+| Windows API | `windows` crate v0.58 |
+| 异步运行时 | Tokio（full features） |
+| WebSocket | tokio-tungstenite v0.21 |
+| 数据库 | rusqlite（bundled，用于系统通知读取） |
+| WMI | wmi crate（用于系统信息查询） |
+
+---
+
+## 项目结构
+
+```
+Windows-Island/
+├── src/                          # 前端 React/TypeScript
+│   ├── main.tsx                  # React 入口，挂载 App
+│   ├── App.tsx                   # 根组件：窗口展开/收缩逻辑、事件监听
+│   ├── styles/
+│   │   └── global.css            # 全局样式（pulse-orange 动画等）
+│   ├── lib/
+│   │   └── tauri.ts              # 所有 Tauri IPC 调用封装（api 对象）+ 类型定义
+│   ├── hooks/
+│   │   ├── useSystemData.ts      # 每 3 秒轮询系统数据的 React Hook
+│   │   └── useGameMode.ts        # 游戏模式检测（防止悬停展开）
+│   └── components/
+│       ├── ExpandedPanel.tsx     # 展开面板：Tab 导航 + 内容区
+│       ├── BatteryStatus.tsx     # 电池图标组件（SystemTab 内使用）
+│       ├── BluetoothStatus.tsx   # 蓝牙图标组件
+│       ├── BrightnessControl.tsx # 亮度滑块
+│       ├── NetworkStatus.tsx     # WiFi 信号图标
+│       ├── VolumeControl.tsx     # 音量滑块
+│       └── tabs/
+│           ├── SystemTab.tsx     # 系统 Tab：电池、WiFi、音量、亮度、蓝牙
+│           ├── MediaTab.tsx      # 媒体 Tab：当前播放歌曲 + 控制按钮
+│           ├── MessagesTab.tsx   # 消息 Tab：最新系统通知
+│           └── AITab.tsx         # AI Tab：Claude Code 状态 + 交互按钮
+│
+├── src-tauri/                    # Rust 后端
+│   ├── Cargo.toml                # Rust 依赖配置
+│   ├── tauri.conf.json           # Tauri 窗口/应用配置
+│   └── src/
+│       ├── main.rs               # 程序入口（调用 lib.rs run()）
+│       ├── lib.rs                # Tauri Builder 配置：插件、setup、命令注册
+│       ├── config.rs             # 配置常量（如 PILL_WIDTH）
+│       ├── window.rs             # 窗口初始化 + 光标追踪器
+│       └── commands/
+│           ├── mod.rs            # 模块声明
+│           ├── agent.rs          # WebSocket 服务器 + 双向通信 + 窗口聚焦
+│           ├── battery.rs        # 电池信息（Win32 System_Power）
+│           ├── bluetooth.rs      # 蓝牙状态（WinRT Devices_Radios）
+│           ├── brightness.rs     # 屏幕亮度（WMI 查询）
+│           ├── gamemode.rs       # 游戏模式检测（进程扫描）
+│           ├── media.rs          # 媒体会话控制（WinRT Media_Control）
+│           ├── network.rs        # WiFi 信息（Win32 NetworkManagement_WiFi）
+│           ├── notification.rs   # 系统通知读取（SQLite 读 Windows 通知数据库）
+│           ├── volume.rs         # 音量控制（Win32 Media_Audio_Endpoints）
+│           └── window.rs         # 窗口调整大小命令
+│
+├── public/
+│   └── sounds/
+│       └── notification.wav      # 通知提示音（C5→E5 双音调，约 1 秒）
+│
+└── ~/.claude/                    # Claude Code 集成配置（非项目目录）
+    ├── scripts/
+    │   └── island-notify.ps1     # Hook 调用的 PowerShell WS 推送脚本
+    └── settings.json             # Claude Code hooks 配置
+```
+
+---
+
+## 架构设计
+
+### 窗口模型
+
+```
+屏幕顶部（全宽透明窗口）
+┌─────────────────────────────────────────────────────────┐  ← 高 20px（透明 hover 区域）
+│              [████] ← 收缩状态的小横条（4px）             │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │          展开面板（480×156px，深色药丸）           │   │  ← 展开时动态调整窗口高度
+│  │  [System] [Media] [Messages] [AI]  ← Tab 导航    │   │
+│  │  ┌──────────────────────────────────────────┐   │   │
+│  │  │           Tab 内容区（120px）              │   │   │
+│  │  └──────────────────────────────────────────┘   │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+- 窗口始终 `always-on-top`，`transparent`，`decorations: false`
+- 收缩时高度 = 20px（透明鼠标检测区），展开时 = 184px
+- 光标追踪通过 Rust 原生线程每 30ms 轮询 `GetCursorPos`，而非依赖 WebView2 鼠标事件（WebView2 失焦时会停止触发）
+- 光标进入/离开通过 Tauri 事件 `cursor-enter` / `cursor-leave` 传递到前端
+
+### IPC 通信模型
+
+```
+前端 (React)  ←→  Tauri IPC  ←→  Rust 后端
+                  invoke()         commands/
+                  listen()         events emit()
+```
+
+- **前端 → 后端**：`invoke("command_name", params)` 调用 Rust `#[tauri::command]`
+- **后端 → 前端**：`app.emit("event-name", payload)` 触发前端 `listen()` 监听器
+
+---
+
+## 已实现功能
+
+### ✅ 1. 系统状态显示（SystemTab）
+
+| 功能 | 实现方式 |
+|------|---------|
+| 电池电量 + 充电状态 | `Win32_System_Power::GetSystemPowerStatus` |
+| WiFi 连接状态 + SSID + 信号强度 | `Win32_NetworkManagement_WiFi` API |
+| 系统音量显示 + 调节 | `Win32_Media_Audio_Endpoints` IAudioEndpointVolume |
+| 屏幕亮度显示 + 调节 | WMI `WmiMonitorBrightness` + `WmiMonitorBrightnessMethods` |
+| 蓝牙开关状态 | WinRT `Devices::Radios` |
+
+数据每 **3 秒**轮询一次（`useSystemData.ts`），使用 `Promise.allSettled` 并行请求，任一失败不影响其他。
+
+### ✅ 2. 媒体控制（MediaTab）
+
+- 读取 Windows 媒体会话（SMTC），显示当前播放曲目和艺术家
+- 支持播放/暂停/上一首/下一首
+- 使用 WinRT `Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager`
+
+### ✅ 3. 系统通知（MessagesTab）
+
+- 读取 Windows 通知数据库（SQLite，路径 `%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db`）
+- 显示最新一条通知（应用名、标题、正文）
+- 新通知到来时面板自动展开 2 秒，收缩横条变蓝
+
+### ✅ 4. 游戏模式（Game Mode Guard）
+
+- 检测前台进程是否为全屏游戏（扫描运行进程）
+- 游戏模式激活时，鼠标悬停**不触发**面板展开，避免遮挡游戏画面
+- `useGameMode.ts` hook 每 5 秒检测一次
+
+### ✅ 5. Claude Code 集成（AITab）
+
+这是本项目的核心扩展功能，分为以下子功能：
+
+#### 5a. 状态接收（WebSocket 服务端）
+
+- Rust 在 `127.0.0.1:27182` 启动 WebSocket TCP 服务器
+- Claude Code（或任何客户端）连接后发送 `AgentStatus` JSON：
+  ```json
+  { "state": "tool_use", "tool": "Bash", "message": "npm run build" }
+  ```
+- Rust 将其转为 Tauri 事件 `agent-status` 推送给前端
+- 前端 `App.tsx` 监听后更新 `agentStatus` 状态
+
+#### 5b. 注意状态自动展开 + 音效
+
+- 当状态为 `waiting_review` 或 `permission_required` 时：
+  - 播放 `public/sounds/notification.wav` 提示音
+  - 自动展开面板
+  - 强制切换到 AI Tab
+  - 收缩横条显示脉冲动画（橙色/红色）
+  - 锁定面板，移开鼠标不会收缩
+
+#### 5c. 双向交互
+
+- **permission_required**：显示 Approve（绿）/ Deny（红）按钮
+  - 点击后通过 WebSocket 发回 `{ "action": "approve" }` 或 `{ "action": "deny" }`
+- **waiting_review**：显示文本输入框 + Send 按钮
+  - 发回 `{ "action": "ask", "message": "用户输入的文字" }`
+- 点击面板空白区域调用 `focus_agent_window()`，将终端窗口聚焦到前台
+
+#### 5d. 聚焦终端窗口
+
+- 使用 Win32 `EnumWindows` 遍历所有可见窗口
+- 查找标题包含 `"claude"` 的窗口
+- 调用 `ShowWindow(SW_RESTORE)` + `SetForegroundWindow`
+
+#### 5e. Claude Code Hooks 自动推送
+
+通过 Claude Code 的 hooks 机制，在每次工具使用前后自动推送状态：
+
+**Hook 脚本**：`~/.claude/scripts/island-notify.ps1`
+- PowerShell 脚本，创建 WS 连接，发送 JSON，3 秒超时，失败静默忽略
+
+**`~/.claude/settings.json` hooks 配置**：
+- `PreToolUse` → 推送 `{ state: "tool_use", tool: "...", message: "..." }`
+- `PostToolUse` → 推送 `{ state: "idle" }`
+- `Stop` → 推送 `{ state: "waiting_review" }`（触发面板自动弹出）
+
+#### 5f. 键盘注入续问 + 审批
+
+用户在 Island AI tab 中的操作会通过 **Win32 SendInput** 直接注入到 Claude Code 终端：
+
+- **续问（waiting_review）**：用户在输入框键入文字 → Rust 聚焦终端窗口 → SendInput 逐字符输入 + Enter
+- **审批（permission_required）**：Approve → 键入 "y" + Enter；Deny → 键入 "n" + Enter
+- 使用 `KEYEVENTF_UNICODE` 标志，绕过输入法，支持中文等多语言输入
+- 聚焦窗口后等待 150ms 确保窗口获得前台焦点
+
+> ⚠️ **注意**：SendInput 发送到当前前台窗口。如果聚焦终端的 150ms 窗口内用户切换了窗口，可能会打字到错误窗口。
+
+---
+
+## 未完成 / 待优化功能
+
+### ❌ 未实现
+
+| 功能 | 说明 |
+|------|------|
+| 多 Claude Code 实例支持 | 当前 WebSocket 服务器只维护一个全局 writer，多个连接会覆盖 |
+| 自定义通知声音 | 目前固定为 `notification.wav`，可添加设置页面 |
+| 设置面板 | 无 UI 可配置轮询间隔、主题色等 |
+| 历史通知列表 | MessagesTab 只显示最新一条通知 |
+| 媒体专辑封面 | MediaTab 不显示专辑封面图片 |
+| 多显示器支持 | 当前固定显示在主显示器顶部 |
+| 应用托盘图标 | 无系统托盘图标，只能通过任务管理器关闭 |
+| 自动启动 | 无开机自启动机制 |
+| 字体图标 | 目前用内联 SVG，未引入图标库 |
+
+### ⚠️ 已知问题 / 技术债
+
+| 问题 | 位置 | 说明 |
+|------|------|------|
+| 系统数据全量轮询 | `useSystemData.ts` | 每 3 秒全量调用 7 个 IPC，应改为事件驱动或按需刷新 |
+| WS 只支持单连接 | `agent.rs WS_WRITER` | 新连接会覆盖旧连接的 writer，不支持并发 |
+| 通知读取可能被 Windows 锁 | `notification.rs` | 直接读 SQLite 可能在数据库锁定时失败，需 retry 机制 |
+| 无测试覆盖 | 整个项目 | 前端无单元测试，后端无集成测试 |
+| `focus_agent_window` 匹配规则简单 | `agent.rs` | 仅匹配标题含 "claude"，可能误匹配其他窗口 |
+
+---
+
+## 核心数据流
+
+### 系统数据流
+
+```
+Rust commands/          →  Tauri IPC invoke()  →  useSystemData.ts  →  ExpandedPanel  →  各 Tab
+battery.rs get_battery                             每 3 秒轮询           data prop
+network.rs get_wifi
+volume.rs get_volume
+...
+```
+
+### Claude Code 状态流
+
+```
+Claude Code              PowerShell              Rust WS Server           前端
+    │   PreToolUse hook      │                       │                      │
+    │──────────────────────→│  island-notify.ps1     │                      │
+    │                        │──── WS JSON ─────────→│                      │
+    │                        │                       │── emit("agent-status")→│
+    │                        │                       │                      │── setAgentStatus()
+    │                        │                       │                      │── 展开面板 + 播放音效
+    │                        │                       │                      │
+    │                        │    ←─── WS JSON ──────│←── sendAgentResponse()│
+    │← (未来: 读取 WS 响应) ─│                       │   action/message     │
+```
+
+### 鼠标悬停流
+
+```
+Win32 GetCursorPos (30ms 轮询)
+    │
+    ├── cursor inside window → emit("cursor-enter") → doExpand() → resizeWindow(184)
+    └── cursor outside window → emit("cursor-leave") → doCollapse() → resizeWindow(20)
+                                                            ↑
+                                              注意状态时 doCollapse() 被阻断
+```
+
+---
+
+## WebSocket 通信协议
+
+### 服务端地址
+
+`ws://127.0.0.1:27182`
+
+### 入站消息（客户端 → Windows-Island）
+
+```typescript
+interface AgentStatus {
+  state: "idle" | "tool_use" | "waiting_review" | "permission_required";
+  tool?: string;    // state = "tool_use" 时填写工具名
+  message?: string; // 可选附加说明
+}
+```
+
+示例：
+```json
+{ "state": "tool_use", "tool": "Bash", "message": "cargo build" }
+{ "state": "waiting_review", "message": "请确认这段代码是否正确" }
+{ "state": "permission_required", "message": "需要执行 rm -rf，请批准" }
+{ "state": "idle" }
+```
+
+### 出站消息（Windows-Island → 客户端）
+
+```typescript
+interface AgentResponse {
+  action: "approve" | "deny" | "ask";
+  message?: string; // action = "ask" 时填写用户输入
+}
+```
+
+示例：
+```json
+{ "action": "approve" }
+{ "action": "deny" }
+{ "action": "ask", "message": "请帮我把注释也翻译成中文" }
+```
+
+---
+
+## Claude Code Hooks 集成
+
+### 推送脚本
+
+位置：`~/.claude/scripts/island-notify.ps1`
+
+```powershell
+param([string]$State, [string]$Tool = "", [string]$Message = "")
+$ws = New-Object System.Net.WebSockets.ClientWebSocket
+$cts = New-Object System.Threading.CancellationTokenSource
+$cts.CancelAfter(3000)
+try {
+    $ws.ConnectAsync([Uri]"ws://127.0.0.1:27182", $cts.Token).Wait()
+    $json = @{ state = $State; tool = $Tool; message = $Message } | ConvertTo-Json -Compress
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+    $segment = [System.ArraySegment[byte]]::new($bytes)
+    $ws.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).Wait()
+    $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "", $cts.Token).Wait()
+} catch {} finally { $cts.Dispose(); if ($ws) { $ws.Dispose() } }
+```
+
+### settings.json hooks 配置
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "bash -c 'INPUT=$(cat); TOOL=$(echo \"$INPUT\" | jq -r \".tool // empty\"); MSG=$(echo \"$INPUT\" | jq -r \".tool_input.command // .tool_input.file_path // empty\" 2>/dev/null | head -c 100); powershell.exe -NoProfile -File \"C:/Users/USERNAME/.claude/scripts/island-notify.ps1\" -State tool_use -Tool \"$TOOL\" -Message \"$MSG\"'"
+      }]
+    }],
+    "PostToolUse": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "powershell.exe -NoProfile -File \"C:/Users/USERNAME/.claude/scripts/island-notify.ps1\" -State idle"
+      }]
+    }],
+    "Stop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "powershell.exe -NoProfile -File \"C:/Users/USERNAME/.claude/scripts/island-notify.ps1\" -State idle"
+      }]
+    }]
+  }
+}
+```
+
+> 将 `USERNAME` 替换为实际 Windows 用户名。
+
+---
+
+## 构建与运行
+
+### 前置要求
+
+- [Node.js](https://nodejs.org/) >= 18
+- [Rust](https://rustup.rs/) (stable)
+- [Tauri CLI](https://tauri.app/) — 通过 npm 安装即可
+
+### 安装依赖
+
+```bash
+cd E:\Develop\Windows-Island
+npm install
+```
+
+### 开发模式（热重载）
+
+```bash
+npm run tauri dev
+```
+
+启动后会打开一个透明的顶部 HUD 窗口。开发期间建议用 F12 打开 DevTools（需在 `tauri.conf.json` 开启 `devtools: true`）。
+
+### 生产构建
+
+```bash
+npm run tauri build
+```
+
+输出在 `src-tauri/target/release/` 目录下。
+
+### 测试 WebSocket 推送
+
+```bash
+# 安装 wscat（如未安装）
+npm install -g wscat
+
+# 连接到 Windows-Island
+wscat -c ws://127.0.0.1:27182
+
+# 发送测试消息
+{"state":"waiting_review","message":"请确认这个操作"}
+{"state":"permission_required","message":"需要删除文件"}
+{"state":"tool_use","tool":"Bash","message":"cargo build"}
+{"state":"idle"}
+```
+
+---
+
+## 如何扩展
+
+### 添加新的 Rust 命令
+
+1. 在 `src-tauri/src/commands/` 创建新文件（如 `cpu.rs`）
+2. 实现 `#[tauri::command]` 函数
+3. 在 `commands/mod.rs` 中 `pub mod cpu;`
+4. 在 `lib.rs` 的 `invoke_handler![]` 宏中注册
+
+```rust
+// commands/cpu.rs
+#[tauri::command]
+pub fn get_cpu_usage() -> f32 {
+    // Win32 implementation...
+    0.0
+}
+```
+
+### 添加新的前端 API
+
+在 `src/lib/tauri.ts` 的 `api` 对象中添加：
+
+```typescript
+getCpuUsage: () => invoke<number>("get_cpu_usage"),
+```
+
+### 添加新的 Tab
+
+1. 创建 `src/components/tabs/CpuTab.tsx`
+2. 在 `ExpandedPanel.tsx` 的 `TABS` 数组中添加 `{ id: "cpu", label: "CPU" }`
+3. 在 `TabId` 类型中添加 `"cpu"`
+4. 在内容区 `{activeTab === "cpu" && <CpuTab ... />}` 中渲染
+
+### 在 `useSystemData` 中添加新数据
+
+```typescript
+// useSystemData.ts
+const [battery, wifi, volume, brightness, bluetooth, media, notification, cpu] =
+  await Promise.allSettled([
+    api.getBattery(),
+    // ...
+    api.getCpuUsage(),  // 新增
+  ]);
+```
+
+### 添加新的 Tauri 事件监听
+
+```typescript
+// App.tsx
+useEffect(() => {
+  const unlisten = listen<SomePayload>("my-event", (event) => {
+    // 处理事件
+  });
+  return () => { unlisten.then(f => f()); };
+}, []);
+```
+
+---
+
+## 关键文件速查
+
+| 想修改 | 看这个文件 |
+|--------|-----------|
+| 面板展开/收缩逻辑 | `src/App.tsx` |
+| Tab 导航和布局 | `src/components/ExpandedPanel.tsx` |
+| Claude Code AI 状态显示 | `src/components/tabs/AITab.tsx` |
+| 系统数据轮询 | `src/hooks/useSystemData.ts` |
+| 所有前端 API 调用 | `src/lib/tauri.ts` |
+| WebSocket 服务器 + 双向通信 | `src-tauri/src/commands/agent.rs` |
+| 窗口初始化 + 光标追踪 | `src-tauri/src/window.rs` |
+| 所有命令注册 | `src-tauri/src/lib.rs` |
+| 全局样式（动画等） | `src/styles/global.css` |

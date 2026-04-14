@@ -1,0 +1,124 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:root {
+  --bar-color: #1a1a1a;
+  --bar-height: 4px;
+  --panel-height: 120px;
+  --panel-bg: #111111;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.5);
+  --accent-orange: #ff8c00;
+  --accent-red: #ff3b30;
+  --accent-blue: #0a84ff;
+  --accent-green: #30d158;
+  --divider: rgba(255, 255, 255, 0.10);
+}
+
+/* Scrolling marquee for long media titles */
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  20%  { transform: translateX(0); }
+  80%  { transform: translateX(var(--marquee-offset, -50%)); }
+  100% { transform: translateX(var(--marquee-offset, -50%)); }
+}
+
+.marquee-container {
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 100px;
+}
+
+.marquee-text {
+  display: inline-block;
+  animation: marquee 6s ease-in-out infinite alternate;
+}
+
+/* Pulse animations */
+@keyframes pulse-orange {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes charging {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+/* Buttons */
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Range slider — slim macOS-like style */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+  transition: transform 0.1s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* Agent response panel scrollbar — slim dark theme */
+.agent-response-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.agent-response-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.agent-response-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.agent-response-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
