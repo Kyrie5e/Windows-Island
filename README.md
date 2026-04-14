@@ -1,3 +1,7 @@
+
+
+
+
 # Windows Island
 
 > 仿 macOS Dynamic Island 风格的 Windows 顶部状态栏 HUD，基于 Tauri + React + TypeScript 构建。
@@ -6,7 +10,9 @@
 
 ## 效果预览
 
-> 📸 _截图待添加_
+> ![image-20260414111318837](C:\Users\17474\AppData\Roaming\Typora\typora-user-images\image-20260414111318837.png)
+>
+> ![image-20260414111406887](C:\Users\17474\AppData\Roaming\Typora\typora-user-images\image-20260414111406887.png)
 
 平时收缩为屏幕顶部中央的一条短横线，鼠标悬停时展开为药丸形状的信息面板。
 
@@ -26,9 +32,9 @@
 |------|------|
 | 🔋 **系统状态** | 电池、WiFi 信号、音量、屏幕亮度、蓝牙 |
 | 🎵 **媒体控制** | 读取 Windows SMTC，支持播放/暂停/切曲 |
-| 🔔 **系统通知** | 实时读取 Windows 通知，新通知自动弹出 |
+| 🔔 **系统通知** | 实时读取 Windows 通知，新通知自动弹出（暂未实现） |
 | 🤖 **AI 集成** | 与 Claude Code 深度集成，可在面板内审批/回复 |
-| 🎮 **游戏模式** | 检测全屏游戏，自动禁用悬停展开 |
+| 🎮 **游戏模式** | 检测全屏页面，自动禁用悬停展开 |
 
 ---
 
