@@ -76,7 +76,11 @@ export default function AITab({ status, onResponded, lastAgentMessage, onClearAg
     await api.sendAgentResponse("ask", inputText.trim()).catch(() => {});
     setInputText("");
     setSending(false);
-    onResponded?.();
+    if (status.state === "idle") {
+      onClearAgentMessage?.();
+    } else {
+      onResponded?.();
+    }
   };
 
   const handleFocus = () => {
@@ -223,6 +227,40 @@ export default function AITab({ status, onResponded, lastAgentMessage, onClearAg
       {/* Agent completed response panel */}
       {status.state === "idle" && lastAgentMessage && (
         <AgentResponsePanel message={lastAgentMessage} onClear={onClearAgentMessage} onToggle={onResponsePanelToggle} />
+      )}
+
+      {/* Idle input — send new messages to the agent */}
+      {status.state === "idle" && (
+        <div
+          style={{ display: "flex", gap: 6, marginTop: "auto" }}
+        >
+          <input
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSendMessage(); }}
+            placeholder="Send a message..."
+            style={{
+              flex: 1, height: 26, borderRadius: 13,
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "#fff", fontSize: 12,
+              padding: "0 12px", outline: "none",
+            }}
+          />
+          <button
+            onClick={handleSendMessage}
+            disabled={sending || !inputText.trim()}
+            style={{
+              height: 26, paddingInline: 14, borderRadius: 13,
+              background: "#0a84ff", color: "#fff",
+              fontSize: 12, fontWeight: 600,
+              border: "none", cursor: "pointer",
+              opacity: (sending || !inputText.trim()) ? 0.5 : 1,
+            }}
+          >
+            Send
+          </button>
+        </div>
       )}
     </div>
   );

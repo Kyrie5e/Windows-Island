@@ -12,7 +12,7 @@
 >
 > ![3](assets/3.png)
 >
-> 
+> ![1](assets/4.png)
 
 平时收缩为屏幕顶部中央的一条短横线，鼠标悬停时展开为药丸形状的信息面板。
 
@@ -33,7 +33,7 @@
 | 🔋 **系统状态** | 电池、WiFi 信号、音量、屏幕亮度、蓝牙 |
 | 🎵 **媒体控制** | 读取 Windows SMTC，支持播放/暂停/切曲 |
 | 🔔 **系统通知** | 实时读取 Windows 通知，新通知自动弹出（暂未实现） |
-| 🤖 **AI 集成** | 与 Claude Code 深度集成，可在面板内审批/回复 |
+| 🤖 **AI 集成** | 与 Claude Code 深度集成，可在面板内审批/回复/发起新对话 |
 | 🎮 **游戏模式** | 检测全屏页面，自动禁用悬停展开 |
 
 ---
@@ -95,7 +95,7 @@ Claude Code (hooks) → PowerShell → WebSocket → Rust → 前端面板
 1. Claude Code 通过 `PreToolUse` / `Stop` hooks 调用 PowerShell 脚本
 2. 脚本将状态通过 WebSocket 推送到 `ws://127.0.0.1:27182`
 3. 面板自动展开，切换到 AI Tab，显示当前状态
-4. 用户可在面板内点击 **Approve / Always / Deny**，或直接输入回复
+4. 用户可在面板内点击 **Approve / Always / Deny**，或直接输入回复；AI 完成回复后，面板底部始终显示输入框，可直接发起新对话
 
 ### WebSocket 协议
 

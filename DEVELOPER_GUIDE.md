@@ -214,6 +214,8 @@ Windows-Island/
   - Deny    → WebSocket 发回 `{ "action": "deny" }`
 - **waiting_review**：显示文本输入框 + Send 按钮
   - 发回 `{ "action": "ask", "message": "用户输入的文字" }`
+- **idle**：面板底部始终显示输入框，用户可在查看 AI 回复后直接发起新对话
+  - 发送后清除上次 AI 回复面板，通过键盘注入将文本输入到 Claude Code 终端
 - 点击面板空白区域调用 `focus_agent_window()`，将终端窗口聚焦到前台
 
 #### 5d. 聚焦终端窗口
@@ -250,11 +252,9 @@ Windows-Island/
 
 > ✅ **审批操作纯文件驱动，无键盘注入**，不会污染终端输入。
 
-#### 5g. 键盘注入续问
+#### 5g. 键盘注入输入
 
-续问（`waiting_review`）仍然使用 Win32 SendInput：
-
-- 用户在 AI Tab 输入框键入文字 → Rust 聚焦终端窗口（查找标题含 `"claude"` 的窗口）→ SendInput 逐字符发送 + Enter
+用户在 AI Tab 输入框键入文字（`waiting_review` 续问或 `idle` 新对话均适用）→ Rust 聚焦终端窗口（查找标题含 `"claude"` 的窗口）→ SendInput 逐字符发送 + Enter。
 - 使用 `KEYEVENTF_UNICODE` 标志，绕过输入法，支持中文等多语言输入
 
 #### 5h. AI 回复 Markdown 渲染（AgentResponsePanel）
