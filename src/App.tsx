@@ -37,11 +37,11 @@ export default function App() {
       const prevState = agentStateRef.current;
       setAgentStatus(event.payload);
 
-      // Capture completed message when transitioning from active → idle
-      // Use the incoming event's message (sent by Stop hook), not the previous state's message
+      // Capture completed message when idle arrives with a message (sent by Stop hook).
+      // Don't require prevState !== "idle" — PostToolUse may have already sent an idle
+      // before the Stop hook fires with the actual completion message.
       const hasCompletionMessage =
         event.payload.state === "idle" &&
-        prevState !== "idle" &&
         event.payload.message;
 
       if (hasCompletionMessage) {
@@ -130,7 +130,7 @@ export default function App() {
   function handleAgentResponded() {
     setAgentStatus({ state: "idle" });
     setForceAITab(false);
-    doCollapse();
+    doCollapse(true); // force=true: bypass the attention-state guard since user already responded
   }
 
   // Top collapsed bar — always visible

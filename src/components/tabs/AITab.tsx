@@ -127,8 +127,8 @@ export default function AITab({ status, onResponded, lastAgentMessage, onClearAg
         </div>
       </div>
 
-      {/* Message display */}
-      {status.message && (
+      {/* Message display — hide for idle (handled by AgentResponsePanel below) */}
+      {status.message && status.state !== "idle" && (
         <div style={{
           color: "rgba(255,255,255,0.5)", fontSize: 11,
           overflow: "hidden", textOverflow: "ellipsis",

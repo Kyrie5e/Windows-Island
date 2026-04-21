@@ -1,11 +1,3 @@
-![1](assets/1.png)
-
-![2](assets/2.png)
-
-![3](assets/3.png)
-
-
-
 # Windows Island
 
 > 仿 macOS Dynamic Island 风格的 Windows 顶部状态栏 HUD，基于 Tauri + React + TypeScript 构建。
@@ -14,6 +6,12 @@
 
 ## 效果预览
 
+> ![1](assets/1.png)
+>
+> ![2](assets/2.png)
+>
+> ![3](assets/3.png)
+>
 > 
 
 平时收缩为屏幕顶部中央的一条短横线，鼠标悬停时展开为药丸形状的信息面板。
@@ -97,7 +95,7 @@ Claude Code (hooks) → PowerShell → WebSocket → Rust → 前端面板
 1. Claude Code 通过 `PreToolUse` / `Stop` hooks 调用 PowerShell 脚本
 2. 脚本将状态通过 WebSocket 推送到 `ws://127.0.0.1:27182`
 3. 面板自动展开，切换到 AI Tab，显示当前状态
-4. 用户可在面板内点击 **Approve / Deny**，或直接输入回复
+4. 用户可在面板内点击 **Approve / Always / Deny**，或直接输入回复
 
 ### WebSocket 协议
 
@@ -112,6 +110,7 @@ Claude Code (hooks) → PowerShell → WebSocket → Rust → 前端面板
 **Island → 客户端（用户响应）：**
 ```json
 { "action": "approve" }
+{ "action": "always_allow" }
 { "action": "deny" }
 { "action": "ask", "message": "用户输入的内容" }
 ```
@@ -127,14 +126,16 @@ Windows-Island/
 ├── src/                    # 前端 React/TypeScript
 │   ├── App.tsx             # 根组件：展开/收缩逻辑
 │   ├── components/
-│   │   ├── ExpandedPanel.tsx   # 展开面板 + Tab 导航
+│   │   ├── ExpandedPanel.tsx       # 展开面板 + Tab 导航
+│   │   ├── AgentResponsePanel.tsx  # AI 回复展示面板（Markdown 渲染）
 │   │   └── tabs/
 │   │       ├── SystemTab.tsx   # 系统状态
 │   │       ├── MediaTab.tsx    # 媒体控制
 │   │       ├── MessagesTab.tsx # 系统通知
 │   │       └── AITab.tsx       # Claude Code 集成
 │   ├── hooks/
-│   │   └── useSystemData.ts    # 系统数据轮询（每 3 秒）
+│   │   ├── useSystemData.ts    # 系统数据轮询（每 3 秒）
+│   │   └── useGameMode.ts      # 游戏模式检测
 │   └── lib/tauri.ts            # Tauri IPC 封装
 │
 └── src-tauri/              # Rust 后端
@@ -143,7 +144,7 @@ Windows-Island/
         │   ├── agent.rs    # WebSocket 服务器
         │   ├── battery.rs  # 电池信息
         │   ├── media.rs    # 媒体控制
-        │   └── ...
+        │   └── ...\
         └── window.rs       # 窗口 + 光标追踪
 ```
 

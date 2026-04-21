@@ -38,6 +38,7 @@
 | 框架 | Tauri v2（Rust 后端 + WebView2 前端） |
 | 前端 | React + TypeScript，Vite 构建 |
 | 动画 | Framer Motion |
+| Markdown 渲染 | react-markdown + remark-gfm + react-syntax-highlighter |
 | 后端语言 | Rust（2021 edition） |
 | Windows API | `windows` crate v0.58 |
 | 异步运行时 | Tokio（full features） |
@@ -63,6 +64,7 @@ Windows-Island/
 │   │   └── useGameMode.ts        # 游戏模式检测（防止悬停展开）
 │   └── components/
 │       ├── ExpandedPanel.tsx     # 展开面板：Tab 导航 + 内容区
+│       ├── AgentResponsePanel.tsx # AI 回复面板：Markdown 渲染 + 滚动阴影 + 展开/折叠
 │       ├── BatteryStatus.tsx     # 电池图标组件（SystemTab 内使用）
 │       ├── BluetoothStatus.tsx   # 蓝牙图标组件
 │       ├── BrightnessControl.tsx # 亮度滑块
@@ -206,8 +208,10 @@ Windows-Island/
 
 #### 5c. 双向交互
 
-- **permission_required**：显示 Approve（绿）/ Deny（红）按钮
-  - 点击后通过 WebSocket 发回 `{ "action": "approve" }` 或 `{ "action": "deny" }`
+- **permission_required**：显示 Approve（绿）/ Always（浅绿，永久放行）/ Deny（红）三个按钮
+  - Approve → WebSocket 发回 `{ "action": "approve" }`
+  - Always  → WebSocket 发回 `{ "action": "always_allow" }`，并将工具名写入 `settings.local.json` 的 `permissions.allow`
+  - Deny    → WebSocket 发回 `{ "action": "deny" }`
 - **waiting_review**：显示文本输入框 + Send 按钮
   - 发回 `{ "action": "ask", "message": "用户输入的文字" }`
 - 点击面板空白区域调用 `focus_agent_window()`，将终端窗口聚焦到前台
@@ -253,9 +257,22 @@ Windows-Island/
 - 用户在 AI Tab 输入框键入文字 → Rust 聚焦终端窗口（查找标题含 `"claude"` 的窗口）→ SendInput 逐字符发送 + Enter
 - 使用 `KEYEVENTF_UNICODE` 标志，绕过输入法，支持中文等多语言输入
 
----
+#### 5h. AI 回复 Markdown 渲染（AgentResponsePanel）
 
-## 未完成 / 待优化功能
+当 Claude Code `Stop` hook 触发时，`island-notify.ps1` 从 transcript 提取 AI 最后一条回复，通过 WebSocket 发送：
+
+```json
+{ "state": "idle", "message": "AI 回复的内容（Markdown 格式）" }
+```
+
+前端接收后在 `AITab` 内展示 `AgentResponsePanel` 组件：
+- 默认折叠，点击标题展开
+- 支持 Markdown 渲染（GFM 表格、列表、引用块等）
+- 代码块带语法高亮（tsx/ts/js/py/bash/json/css/rust/powershell）
+- 超长内容可滚动（最大高度 300px），顶底带渐变阴影
+- 展开时自动调整 Island 窗口高度（+320px）
+
+---
 
 ### ❌ 未实现
 
@@ -351,7 +368,7 @@ interface AgentStatus {
 
 ```typescript
 interface AgentResponse {
-  action: "approve" | "deny" | "ask";
+  action: "approve" | "always_allow" | "deny" | "ask" | "cancel";
   message?: string; // action = "ask" 时填写用户输入
 }
 ```
@@ -359,6 +376,7 @@ interface AgentResponse {
 示例：
 ```json
 { "action": "approve" }
+{ "action": "always_allow" }
 { "action": "deny" }
 { "action": "ask", "message": "请帮我把注释也翻译成中文" }
 ```
@@ -557,6 +575,7 @@ useEffect(() => {
 | 面板展开/收缩逻辑 | `src/App.tsx` |
 | Tab 导航和布局 | `src/components/ExpandedPanel.tsx` |
 | Claude Code AI 状态显示 | `src/components/tabs/AITab.tsx` |
+| AI 回复 Markdown 渲染 | `src/components/AgentResponsePanel.tsx` |
 | 系统数据轮询 | `src/hooks/useSystemData.ts` |
 | 所有前端 API 调用 | `src/lib/tauri.ts` |
 | WebSocket 服务器 + 双向通信 | `src-tauri/src/commands/agent.rs` |
