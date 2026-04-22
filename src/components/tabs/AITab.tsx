@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AgentStatus, api } from "../../lib/tauri";
 import AgentResponsePanel from "../AgentResponsePanel";
 
@@ -31,6 +31,9 @@ const STATE_DOT: Record<AgentStatus["state"], string> = {
   permission_required: "#ff3b30",
 };
 
+const MIN_TEXTAREA_HEIGHT = 32;
+const MAX_TEXTAREA_HEIGHT = 80;
+
 function AgentIcon({ state }: { state: AgentStatus["state"] }) {
   const color = STATE_COLOR[state];
   return (
@@ -43,48 +46,105 @@ function AgentIcon({ state }: { state: AgentStatus["state"] }) {
   );
 }
 
+function autoResize(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${Math.min(Math.max(el.scrollHeight, MIN_TEXTAREA_HEIGHT), MAX_TEXTAREA_HEIGHT)}px`;
+}
+
 export default function AITab({ status, onResponded, lastAgentMessage, onClearAgentMessage, onResponsePanelToggle }: Props) {
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isAttention = status.state === "waiting_review" || status.state === "permission_required";
 
+  useEffect(() => {
+    if (textareaRef.current) {
+      autoResize(textareaRef.current);
+    }
+  }, [inputText, status.state]);
+
   const handleApprove = async () => {
+    setError(null);
     setSending(true);
-    await api.sendAgentResponse("approve").catch(() => {});
-    setSending(false);
-    onResponded?.();
+    try {
+      await api.sendAgentResponse("approve");
+      setSending(false);
+      onResponded?.();
+    } catch {
+      setSending(false);
+      setError("Failed to approve. Try again.");
+    }
   };
 
   const handleAlwaysAllow = async () => {
+    setError(null);
     setSending(true);
-    await api.sendAgentResponse("always_allow").catch(() => {});
-    setSending(false);
-    onResponded?.();
+    try {
+      await api.sendAgentResponse("always_allow");
+      setSending(false);
+      onResponded?.();
+    } catch {
+      setSending(false);
+      setError("Failed to save permission. Try again.");
+    }
   };
 
   const handleDeny = async () => {
+    setError(null);
     setSending(true);
-    await api.sendAgentResponse("deny").catch(() => {});
-    setSending(false);
-    onResponded?.();
+    try {
+      await api.sendAgentResponse("deny");
+      setSending(false);
+      onResponded?.();
+    } catch {
+      setSending(false);
+      setError("Failed to deny. Try again.");
+    }
   };
 
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
+    setError(null);
     setSending(true);
-    await api.sendAgentResponse("ask", inputText.trim()).catch(() => {});
-    setInputText("");
-    setSending(false);
-    if (status.state === "idle") {
-      onClearAgentMessage?.();
-    } else {
-      onResponded?.();
+    try {
+      await api.sendAgentResponse("ask", inputText.trim());
+      setInputText("");
+      setSending(false);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = `${MIN_TEXTAREA_HEIGHT}px`;
+      }
+      if (status.state === "idle") {
+        onClearAgentMessage?.();
+      } else {
+        onResponded?.();
+      }
+    } catch {
+      setSending(false);
+      setError("Failed to send message. Try again.");
     }
   };
 
   const handleFocus = () => {
     api.focusAgentWindow().catch(() => {});
+  };
+
+  const textareaStyle: React.CSSProperties = {
+    flex: 1,
+    minHeight: MIN_TEXTAREA_HEIGHT,
+    maxHeight: MAX_TEXTAREA_HEIGHT,
+    borderRadius: 16,
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    color: "#fff",
+    fontSize: 12,
+    padding: "6px 12px",
+    outline: "none",
+    resize: "none",
+    lineHeight: "18px",
+    fontFamily: "inherit",
+    overflow: "auto",
   };
 
   return (
@@ -190,33 +250,46 @@ export default function AITab({ status, onResponded, lastAgentMessage, onClearAg
         </div>
       )}
 
+      {/* Error message */}
+      {error && (
+        <div style={{ color: "#ff3b30", fontSize: 10, textAlign: "center" }}>
+          {error}
+        </div>
+      )}
+
       {/* Review input */}
       {status.state === "waiting_review" && (
         <div
-          style={{ display: "flex", gap: 6, marginTop: "auto" }}
+          style={{ display: "flex", gap: 6, marginTop: "auto", alignItems: "flex-end" }}
         >
-          <input
+          <textarea
+            ref={textareaRef}
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleSendMessage(); }}
-            placeholder="Type a response..."
-            style={{
-              flex: 1, height: 26, borderRadius: 13,
-              background: "rgba(255,255,255,0.08)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              color: "#fff", fontSize: 12,
-              padding: "0 12px", outline: "none",
+            onChange={(e) => {
+              setInputText(e.target.value);
+              autoResize(e.target);
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage();
+              }
+            }}
+            placeholder="Type a response..."
+            rows={1}
+            className="ai-textarea"
+            style={textareaStyle}
           />
           <button
             onClick={handleSendMessage}
             disabled={sending || !inputText.trim()}
             style={{
-              height: 26, paddingInline: 14, borderRadius: 13,
+              height: 32, paddingInline: 14, borderRadius: 16,
               background: "#0a84ff", color: "#fff",
               fontSize: 12, fontWeight: 600,
               border: "none", cursor: "pointer",
               opacity: (sending || !inputText.trim()) ? 0.5 : 1,
+              flexShrink: 0,
             }}
           >
             Send
@@ -232,30 +305,36 @@ export default function AITab({ status, onResponded, lastAgentMessage, onClearAg
       {/* Idle input — send new messages to the agent */}
       {status.state === "idle" && (
         <div
-          style={{ display: "flex", gap: 6, marginTop: "auto" }}
+          style={{ display: "flex", gap: 6, marginTop: "auto", alignItems: "flex-end" }}
         >
-          <input
+          <textarea
+            ref={textareaRef}
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleSendMessage(); }}
-            placeholder="Send a message..."
-            style={{
-              flex: 1, height: 26, borderRadius: 13,
-              background: "rgba(255,255,255,0.08)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              color: "#fff", fontSize: 12,
-              padding: "0 12px", outline: "none",
+            onChange={(e) => {
+              setInputText(e.target.value);
+              autoResize(e.target);
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage();
+              }
+            }}
+            placeholder="Send a message..."
+            rows={1}
+            className="ai-textarea"
+            style={textareaStyle}
           />
           <button
             onClick={handleSendMessage}
             disabled={sending || !inputText.trim()}
             style={{
-              height: 26, paddingInline: 14, borderRadius: 13,
+              height: 32, paddingInline: 14, borderRadius: 16,
               background: "#0a84ff", color: "#fff",
               fontSize: 12, fontWeight: 600,
               border: "none", cursor: "pointer",
               opacity: (sending || !inputText.trim()) ? 0.5 : 1,
+              flexShrink: 0,
             }}
           >
             Send

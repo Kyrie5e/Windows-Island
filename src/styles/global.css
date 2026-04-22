@@ -123,6 +123,20 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
 }
 
+/* AI tab textarea scrollbar */
+.ai-textarea::-webkit-scrollbar {
+  width: 3px;
+}
+
+.ai-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ai-textarea::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
 /* ── Markdown rendering styles ── */
 .markdown-body h1,
 .markdown-body h2,
